@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(ralph-wiggum:ralph-loop)",
+      "Skill(ralph-wiggum:ralph-loop:*)",
+      "Bash(docker compose config:*)",
+      "Bash(echo:*)",
+      "Bash(python3:*)",
+      "Bash(npm install:*)",
+      "Bash(curl:*)",
+      "Bash(docker compose exec:*)",
+      "Bash(docker compose up:*)",
+      "Bash(make restart:*)",
+      "Bash(make up:*)",
+      "Bash(docker compose:*)",
+      "mcp__filesystem__read_multiple_files",
+      "mcp__filesystem__read_text_file",
+      "Bash(git init)",
+      "Bash(git add -A)"
+    ]
+  }
+}

@@ -1,0 +1,76 @@
+# ── Python ──────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+.env
+!.env.example
+.python-version
+pip-log.txt
+pip-delete-this-directory.txt
+
+# uv
+.uv/
+
+# ── Node / Next.js ────────────────────────────────────────
+node_modules/
+.pnp/
+.pnp.js
+.next/
+out/
+frontend/build/
+*.tsbuildinfo
+next-env.d.ts
+.vercel
+
+# ── Docker / Compose ──────────────────────────────────────
+.docker/
+docker-compose.override.yml
+
+# ── Databases / Secrets ───────────────────────────────────
+*.sqlite
+*.sqlite3
+*.db
+postgres-data/
+redis-data/
+ollama-data/
+
+# ── IDE ───────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ── Logs ─────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Test & Coverage ───────────────────────────────────────
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+*.cover
+
+# ── LiteLLM ──────────────────────────────────────────────
+litellm_proxy_logs/
+litellm.db
+
+# ── Alembic (keep versions, ignore __pycache__) ───────────
+backend/alembic/versions/__pycache__/
+
+# ── Misc ──────────────────────────────────────────────────
+*.bak
+*.tmp
+.cache/
