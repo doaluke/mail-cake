@@ -1,9 +1,9 @@
 "use client";
+import { Suspense, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { settingsApi, authApi } from "@/lib/api";
+import { settingsApi } from "@/lib/api";
 import Sidebar from "@/components/layout/Sidebar";
 import ModelStyleSelector from "@/components/email/ModelStyleSelector";
-import { useState } from "react";
 
 export default function SettingsPage() {
   const qc = useQueryClient();
@@ -19,7 +19,9 @@ export default function SettingsPage() {
 
   return (
     <div className="flex min-h-screen">
-      <Sidebar />
+      <Suspense fallback={<div className="w-56 bg-white border-r border-gray-200" />}>
+        <Sidebar />
+      </Suspense>
       <main className="flex-1 p-8 max-w-2xl">
         <h1 className="text-2xl font-bold text-gray-900 mb-6">設定</h1>
 

@@ -84,6 +84,7 @@ class LLMService:
         style: str = "bullet_points",
         model: str | None = None,
         language: str = "zh-TW",
+        topic_skill: str | None = None,
     ) -> dict:
         """
         一次 LLM call 完成摘要 + 評分 + 回覆建議
@@ -102,6 +103,8 @@ class LLMService:
             style=STYLE_PROMPTS.get(style, STYLE_PROMPTS["bullet_points"]),
             language=language,
         )
+        if topic_skill:
+            system_prompt = f"【信件集整理指示】\n{topic_skill}\n\n" + system_prompt
 
         # 截斷過長的信件（省 token）
         max_chars = settings.max_tokens_per_email * 3  # 約 3 char/token

@@ -4,6 +4,7 @@ Email 同步 Worker
 - 觸發 LLM 摘要分析
 """
 import asyncio
+import json
 import logging
 from datetime import datetime
 from sqlalchemy import select, desc
@@ -12,6 +13,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.database import AsyncSessionLocal
 from app.models.email import EmailAccount, EmailMessage, EmailSyncState
+from app.models.topic import Topic, EmailTopic
 from app.models.summary import EmailSummary
 from app.services import gmail_service, crypto_service
 from app.services.llm_service import LLMService
@@ -32,6 +34,51 @@ def _resolve_model(model: str) -> str:
         )
         return _CLOUD_FALLBACK_MODEL
     return model
+
+
+async def _classify_email_to_topics(db: AsyncSession, msg: EmailMessage, user_id) -> None:
+    """依照 Topic 的 auto_rules 將信件自動歸類到對應集合"""
+    result = await db.execute(
+        select(Topic).where(
+            Topic.user_id == user_id,
+            Topic.is_active == True,  # noqa: E712
+            Topic.auto_rules != None,  # noqa: E711
+        )
+    )
+    topics = result.scalars().all()
+    if not topics:
+        return
+
+    sender_lower = (msg.sender or "").lower()
+    subject_lower = (msg.subject or "").lower()
+    msg_labels = [lb.lower() for lb in (msg.labels or [])]
+
+    for topic in topics:
+        try:
+            rules = json.loads(topic.auto_rules)
+        except Exception:
+            continue
+
+        matched = any(p.lower() in sender_lower for p in rules.get("senders", []))
+        if not matched:
+            matched = any(k.lower() in subject_lower for k in rules.get("subject_contains", []))
+        if not matched:
+            matched = any(lb.lower() in msg_labels for lb in rules.get("labels", []))
+
+        if matched:
+            existing = await db.execute(
+                select(EmailTopic).where(
+                    EmailTopic.topic_id == topic.id,
+                    EmailTopic.message_id == msg.id,
+                )
+            )
+            if not existing.scalar_one_or_none():
+                db.add(EmailTopic(
+                    topic_id=topic.id,
+                    message_id=msg.id,
+                    is_manual=False,
+                    confidence=0.9,
+                ))
 
 
 async def sync_all_accounts():
@@ -169,6 +216,10 @@ async def _sync_gmail(db: AsyncSession, account: EmailAccount) -> list[EmailMess
             logger.error(f"取得信件 {msg_ref['id']} 失敗", exc_info=True)
 
     await db.flush()
+
+    # 自動分類：將新信件歸入符合規則的 Topic
+    for msg in new_messages:
+        await _classify_email_to_topics(db, msg, account.user_id)
 
     # 更新同步狀態
     latest_history_id = gmail_service.get_latest_history_id(service)

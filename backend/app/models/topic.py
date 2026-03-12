@@ -26,6 +26,9 @@ class Topic(Base):
     # {"senders": ["@company.com"], "subject_contains": ["invoice"], "labels": ["work"]}
     auto_rules: Mapped[str | None] = mapped_column(Text)
 
+    # 整理描述 Skill — 告訴 AI 如何處理此集合的信件
+    skill_prompt: Mapped[str | None] = mapped_column(Text)
+
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

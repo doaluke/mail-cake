@@ -3,8 +3,9 @@ Topics API - 管理用戶自定義的信件主題
 """
 import uuid
 import json
+import time
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select, func, desc
 from sqlalchemy.orm import selectinload
@@ -27,6 +28,7 @@ class TopicCreate(BaseModel):
     description: Optional[str] = None
     color: str = "#6366f1"
     icon: str = "folder"
+    skill_prompt: Optional[str] = None
     model_override: Optional[str] = None
     style_override: Optional[str] = None
     auto_rules: Optional[dict] = None  # {"senders": [], "subject_contains": [], "labels": []}
@@ -37,6 +39,7 @@ class TopicUpdate(BaseModel):
     description: Optional[str] = None
     color: Optional[str] = None
     icon: Optional[str] = None
+    skill_prompt: Optional[str] = None
     model_override: Optional[str] = None
     style_override: Optional[str] = None
     auto_rules: Optional[dict] = None
@@ -93,6 +96,7 @@ async def create_topic(
         description=data.description,
         color=data.color,
         icon=data.icon,
+        skill_prompt=data.skill_prompt,
         model_override=data.model_override,
         style_override=data.style_override,
         auto_rules=json.dumps(data.auto_rules) if data.auto_rules else None,
@@ -162,6 +166,8 @@ async def update_topic(
         topic.color = data.color
     if data.icon is not None:
         topic.icon = data.icon
+    if data.skill_prompt is not None:
+        topic.skill_prompt = data.skill_prompt
     if data.model_override is not None:
         topic.model_override = data.model_override
     if data.style_override is not None:
@@ -173,7 +179,15 @@ async def update_topic(
 
     await db.commit()
     await db.refresh(topic)
-    return _format_topic(topic)
+
+    # 查詢最新 email count
+    count_result = await db.execute(
+        select(func.count())
+        .select_from(EmailTopic)
+        .where(EmailTopic.topic_id == topic_id)
+    )
+    email_count = count_result.scalar_one()
+    return _format_topic(topic, email_count=email_count)
 
 
 @router.delete("/{topic_id}")
@@ -187,6 +201,87 @@ async def delete_topic(
     topic.is_active = False
     await db.commit()
     return {"ok": True}
+
+
+@router.post("/{topic_id}/summarize")
+async def summarize_topic(
+    topic_id: uuid.UUID,
+    limit: int = Query(10, ge=1, le=30),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """用 skill_prompt 對最近 N 封信件產生聚合摘要"""
+    topic = await _get_topic_or_404(topic_id, current_user.id, db)
+
+    # 取最近 limit 封信件（含摘要）
+    result = await db.execute(
+        select(EmailMessage)
+        .join(EmailTopic, EmailTopic.message_id == EmailMessage.id)
+        .where(EmailTopic.topic_id == topic_id)
+        .options(selectinload(EmailMessage.summary))
+        .order_by(desc(EmailMessage.received_at))
+        .limit(limit)
+    )
+    messages = result.scalars().all()
+
+    if not messages:
+        raise HTTPException(status_code=404, detail="此主題尚無信件")
+
+    # 組合信件摘要文字
+    email_digest = "\n\n---\n\n".join([
+        f"主旨: {m.subject or '(無)'}\n"
+        f"寄件人: {m.sender or '?'}\n"
+        f"時間: {m.received_at.isoformat() if m.received_at else '?'}\n"
+        f"內容: {(m.summary.summary_text if m.summary else None) or m.snippet or (m.body_plain or '')[:400]}"
+        for m in messages
+    ])
+
+    # 決定使用的模型
+    from app.workers.email_sync import _resolve_model
+    raw_model = topic.model_override or current_user.default_model or "claude-haiku"
+    model = _resolve_model(raw_model)
+
+    # 建構系統 Prompt（注入 skill_prompt）
+    skill_instruction = topic.skill_prompt or "請整理出這些信件的共同主題、重要資訊和待辦事項。"
+    aggregate_system = f"""你是一個信件集分析助理。以下是「{topic.name}」信件集中最近 {len(messages)} 封信件的內容。
+
+請依照以下整理方式產出聚合摘要：
+{skill_instruction}
+
+請以 JSON 格式回應（所有文字使用繁體中文）：
+{{
+  "aggregate_summary": "整體摘要（依照整理方式，100-200字）",
+  "key_themes": ["主題1", "主題2", "主題3"],
+  "action_items": ["待辦1", "待辦2"]
+}}"""
+
+    from app.services.llm_service import LLMService
+    llm = LLMService()
+
+    start = time.time()
+    response = await llm.client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": aggregate_system},
+            {"role": "user", "content": f"<emails>\n{email_digest}\n</emails>"},
+        ],
+        temperature=0.3,
+        max_tokens=1200,
+        response_format={"type": "json_object"},
+    )
+    gen_ms = int((time.time() - start) * 1000)
+
+    result_data = json.loads(response.choices[0].message.content)
+
+    return {
+        **result_data,
+        "topic_id": str(topic_id),
+        "topic_name": topic.name,
+        "email_count": len(messages),
+        "model_used": model,
+        "tokens_used": response.usage.total_tokens if response.usage else None,
+        "generation_ms": gen_ms,
+    }
 
 
 @router.post("/{topic_id}/emails/{email_id}")
@@ -287,6 +382,7 @@ def _format_topic(topic: Topic, email_count: int = 0) -> dict:
         "description": topic.description,
         "color": topic.color,
         "icon": topic.icon,
+        "skill_prompt": topic.skill_prompt,
         "model_override": topic.model_override,
         "style_override": topic.style_override,
         "auto_rules": auto_rules,
