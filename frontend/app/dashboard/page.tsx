@@ -1,10 +1,12 @@
 "use client";
-import { useState } from "react";
+import { useState, Suspense } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "next/navigation";
 import { Search, Filter, Zap, RefreshCw } from "lucide-react";
 import { emailsApi } from "@/lib/api";
 import EmailCard from "@/components/email/EmailCard";
 import ModelStyleSelector from "@/components/email/ModelStyleSelector";
+import TopicPanel from "@/components/topic/TopicPanel";
 import { cn } from "@/lib/utils";
 
 const FILTER_TABS = [
@@ -15,7 +17,7 @@ const FILTER_TABS = [
   { label: "電子報",   filter: { category: "電子報" } },
 ];
 
-export default function DashboardPage() {
+function InboxView() {
   const [activeTab, setActiveTab] = useState(0);
   const [search, setSearch] = useState("");
   const [showSettings, setShowSettings] = useState(false);
@@ -139,5 +141,19 @@ export default function DashboardPage() {
         </div>
       )}
     </div>
+  );
+}
+
+function DashboardRouter() {
+  const searchParams = useSearchParams();
+  const topicId = searchParams.get("topic");
+  return topicId ? <TopicPanel topicId={topicId} /> : <InboxView />;
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense fallback={<div className="flex-1 flex items-center justify-center text-gray-400">載入中...</div>}>
+      <DashboardRouter />
+    </Suspense>
   );
 }
