@@ -244,7 +244,7 @@ async def summarize_email_stream(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Streaming 摘要 - 即時顯示生成過程"""
+    """Streaming 摘要 - 即時顯示生成過程，完成後儲存至 DB"""
     result = await db.execute(
         select(EmailMessage)
         .where(EmailMessage.id == email_id)
@@ -257,15 +257,39 @@ async def summarize_email_stream(
 
     content = msg.body_plain or msg.snippet or ""
     llm = LLMService()
+    used_model = model or current_user.default_model
 
     async def generate():
+        accumulated: list[str] = []
         async for chunk in llm.analyze_email_stream(
             content,
             style=style,
-            model=model or current_user.default_model,
+            model=used_model,
             language=current_user.summary_language,
         ):
+            accumulated.append(chunk)
             yield f"data: {chunk}\n\n"
+
+        # 儲存到 DB
+        full_text = "".join(accumulated)
+        if full_text:
+            existing_result = await db.execute(
+                select(EmailSummary).where(EmailSummary.message_id == email_id)
+            )
+            summary = existing_result.scalar_one_or_none()
+            if summary:
+                summary.summary_text = full_text
+                summary.style = style
+                summary.model_used = used_model
+            else:
+                db.add(EmailSummary(
+                    message_id=email_id,
+                    summary_text=full_text,
+                    style=style,
+                    model_used=used_model,
+                ))
+            await db.commit()
+
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(generate(), media_type="text/event-stream")

@@ -1,12 +1,12 @@
 "use client";
-import { useState } from "react";
-import { Paperclip, Zap, Star, ChevronDown, ChevronUp, Copy, Check } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Paperclip, Zap, Star, ChevronDown, ChevronUp, Copy, Check, RefreshCw } from "lucide-react";
 import { cn, timeAgo, urgencyColor, urgencyLabel, sentimentEmoji } from "@/lib/utils";
 import type { Email } from "@/lib/api";
 
 interface Props {
   email: Email;
-  onResummarize?: (id: string, style: string, model: string) => void;
+  onResummarize?: (id: string, style: string, model: string, newText: string) => void;
 }
 
 const URGENCY_STYLES: Record<string, string> = {
@@ -16,17 +16,80 @@ const URGENCY_STYLES: Record<string, string> = {
   gray:   "bg-white border-gray-200 border-l-gray-200",
 };
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
 export default function EmailCard({ email, onResummarize }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [copiedReply, setCopiedReply] = useState<string | null>(null);
+  const [streamingText, setStreamingText] = useState<string | null>(null);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const esRef = useRef<EventSource | null>(null);
+
+  // 清理 EventSource（元件卸載或 email 切換時）
+  useEffect(() => {
+    return () => {
+      esRef.current?.close();
+    };
+  }, [email.id]);
 
   const color = urgencyColor(email.urgency_score);
+
+  // 展開時，如果沒有摘要也沒在 streaming，自動觸發生成
+  const autoTriggered = useRef(false);
+  useEffect(() => {
+    if (expanded && !email.summary && !isStreaming && !streamingText && !autoTriggered.current) {
+      autoTriggered.current = true;
+      handleResummarize();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expanded]);
+
+  const handleResummarize = () => {
+    if (isStreaming) return;
+
+    const style = email.summary?.style || "bullet_points";
+    const model = email.summary?.model_used || "";
+    const params = new URLSearchParams({ style });
+    if (model) params.set("model", model);
+
+    setIsStreaming(true);
+    setStreamingText("");
+
+    const es = new EventSource(
+      `${API_URL}/api/v1/emails/${email.id}/summarize/stream?${params}`,
+      { withCredentials: true }
+    );
+    esRef.current = es;
+
+    let accumulated = "";
+
+    es.onmessage = (e) => {
+      if (e.data === "[DONE]") {
+        es.close();
+        setIsStreaming(false);
+        setStreamingText(null); // 切回由 parent cache 提供資料
+        onResummarize?.(email.id, style, model, accumulated);
+      } else {
+        accumulated += e.data;
+        setStreamingText(accumulated);
+      }
+    };
+
+    es.onerror = () => {
+      es.close();
+      setIsStreaming(false);
+      setStreamingText(null);
+    };
+  };
 
   const copyReply = async (text: string) => {
     await navigator.clipboard.writeText(text);
     setCopiedReply(text);
     setTimeout(() => setCopiedReply(null), 2000);
   };
+
+  // streaming 中顯示串流文字，完成後顯示 DB 資料（由 parent 刷新）
+  const displayText = streamingText !== null ? streamingText : email.summary?.text;
 
   return (
     <div
@@ -94,10 +157,10 @@ export default function EmailCard({ email, onResummarize }: Props) {
           </div>
         </div>
 
-        {/* Snippet (收合時顯示) */}
-        {!expanded && email.summary && (
+        {/* Snippet（收合時顯示） */}
+        {!expanded && displayText && (
           <p className="mt-2 text-xs text-gray-600 line-clamp-2">
-            {email.summary.text}
+            {displayText}
           </p>
         )}
       </div>
@@ -105,30 +168,33 @@ export default function EmailCard({ email, onResummarize }: Props) {
       {/* 展開內容 */}
       {expanded && (
         <div className="px-4 pb-4 border-t border-gray-100 pt-3">
-          {email.summary ? (
+          {displayText !== undefined ? (
             <>
               {/* 摘要 */}
               <div className="mb-3">
                 <div className="flex items-center justify-between mb-1.5">
                   <span className="text-xs font-medium text-gray-500">
-                    AI 摘要 · {email.summary.model_used} · {email.summary.style}
+                    AI 摘要 · {email.summary?.model_used} · {email.summary?.style}
                   </span>
-                  {onResummarize && (
-                    <button
-                      onClick={() => onResummarize(email.id, email.summary!.style, email.summary!.model_used)}
-                      className="text-xs text-primary-600 hover:text-primary-700"
-                    >
-                      重新生成
-                    </button>
-                  )}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleResummarize(); }}
+                    disabled={isStreaming}
+                    className="flex items-center gap-1 text-xs text-primary-600 hover:text-primary-700 disabled:opacity-40"
+                  >
+                    <RefreshCw className={cn("w-3 h-3", isStreaming && "animate-spin")} />
+                    {isStreaming ? "生成中..." : "重新生成"}
+                  </button>
                 </div>
                 <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
-                  {email.summary.text}
+                  {displayText}
+                  {isStreaming && (
+                    <span className="inline-block w-0.5 h-4 bg-primary-500 ml-0.5 animate-pulse align-text-bottom" />
+                  )}
                 </div>
               </div>
 
-              {/* Smart Reply */}
-              {email.summary.reply_suggestions && email.summary.reply_suggestions.length > 0 && (
+              {/* Smart Reply（streaming 中隱藏，完成後顯示） */}
+              {!isStreaming && email.summary?.reply_suggestions && email.summary.reply_suggestions.length > 0 && (
                 <div>
                   <p className="text-xs font-medium text-gray-500 mb-2">💬 回覆建議</p>
                   <div className="flex gap-2 flex-wrap">
@@ -150,7 +216,10 @@ export default function EmailCard({ email, onResummarize }: Props) {
               )}
             </>
           ) : (
-            <p className="text-sm text-gray-400 italic">摘要生成中...</p>
+            <div className="flex items-center gap-2 text-sm text-gray-400 italic">
+              <RefreshCw className="w-3 h-3 animate-spin" />
+              摘要生成中...
+            </div>
           )}
         </div>
       )}

@@ -17,6 +17,10 @@ from app.core.config import get_settings
 
 settings = get_settings()
 
+# Temporary store for PKCE code_verifiers keyed by OAuth state (TTL ~10 min)
+import time as _time
+_pkce_store: dict[str, tuple[str, float]] = {}
+
 GMAIL_SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/userinfo.email",
@@ -50,10 +54,16 @@ def get_auth_url(state: str) -> str:
         state=state,
         prompt="consent",  # 確保取得 refresh_token
     )
+
+    # Store code_verifier if PKCE was auto-generated (oauthlib >= 3.2.0)
+    code_verifier = getattr(flow, "code_verifier", None)
+    if code_verifier:
+        _pkce_store[state] = (code_verifier, _time.time() + 600)
+
     return auth_url
 
 
-def exchange_code_for_tokens(code: str) -> dict:
+def exchange_code_for_tokens(code: str, state: str | None = None) -> dict:
     """用授權碼換取 access_token 和 refresh_token"""
     from google_auth_oauthlib.flow import Flow
 
@@ -70,6 +80,18 @@ def exchange_code_for_tokens(code: str) -> dict:
         scopes=GMAIL_SCOPES,
     )
     flow.redirect_uri = settings.google_redirect_uri
+
+    # Restore PKCE code_verifier if one was generated during authorization
+    if state and state in _pkce_store:
+        code_verifier, expires_at = _pkce_store.pop(state)
+        if _time.time() < expires_at:
+            flow.code_verifier = code_verifier
+
+    # Google sometimes returns a subset of scopes in the token response
+    # (e.g. omits gmail.readonly in incremental auth mode). Relax the check.
+    import os
+    os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
+
     flow.fetch_token(code=code)
 
     creds = flow.credentials

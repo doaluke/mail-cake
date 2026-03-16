@@ -1,9 +1,9 @@
 "use client";
 import { useState, Suspense } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
-import { Search, Filter, Zap, RefreshCw } from "lucide-react";
-import { emailsApi } from "@/lib/api";
+import { Search, Filter, RefreshCw } from "lucide-react";
+import { emailsApi, type Email } from "@/lib/api";
 import EmailCard from "@/components/email/EmailCard";
 import ModelStyleSelector from "@/components/email/ModelStyleSelector";
 import TopicPanel from "@/components/topic/TopicPanel";
@@ -33,11 +33,28 @@ function InboxView() {
     refetchIntervalInBackground: false, // 切到其他分頁時暫停，省資源
   });
 
-  const resummarizeMutation = useMutation({
-    mutationFn: ({ id, style, model }: { id: string; style: string; model: string }) =>
-      emailsApi.summarize(id, style, model),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["emails"] }),
-  });
+  // Streaming 完成後直接更新 cache 中的單一 email，不重拉整包 list
+  const handleResummarize = (id: string, style: string, model: string, newText: string) => {
+    qc.setQueryData(
+      ["emails", activeTab, search],
+      (old: { emails: Email[]; total: number; page: number; page_size: number } | undefined) => {
+        if (!old) return old;
+        return {
+          ...old,
+          emails: old.emails.map((e) =>
+            e.id === id
+              ? {
+                  ...e,
+                  summary: e.summary
+                    ? { ...e.summary, text: newText, style, model_used: model }
+                    : { text: newText, style, model_used: model, reply_suggestions: [] },
+                }
+              : e
+          ),
+        };
+      }
+    );
+  };
 
   return (
     <div className="flex h-screen">
@@ -119,9 +136,7 @@ function InboxView() {
               <EmailCard
                 key={email.id}
                 email={email}
-                onResummarize={(id, style, model) =>
-                  resummarizeMutation.mutate({ id, style, model })
-                }
+                onResummarize={handleResummarize}
               />
             ))
           )}

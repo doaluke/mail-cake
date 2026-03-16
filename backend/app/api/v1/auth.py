@@ -68,7 +68,7 @@ async def gmail_callback(
 ):
     """Gmail OAuth Callback"""
     try:
-        token_data = gmail_service.exchange_code_for_tokens(code)
+        token_data = gmail_service.exchange_code_for_tokens(code, state)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"OAuth 失敗: {str(e)}")
 

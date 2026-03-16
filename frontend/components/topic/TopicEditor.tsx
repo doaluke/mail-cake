@@ -43,14 +43,17 @@ export default function TopicEditor({ topic, onClose }: Props) {
   useEffect(() => {
     if (topic?.auto_rules) {
       try {
-        const rules: AutoRules = JSON.parse(topic.auto_rules);
+        const rules: AutoRules =
+          typeof topic.auto_rules === "string"
+            ? JSON.parse(topic.auto_rules)
+            : topic.auto_rules;
         setSenders((rules.senders ?? []).join(", "));
         setKeywords((rules.subject_contains ?? []).join(", "));
       } catch {}
     }
   }, [topic]);
 
-  const buildAutoRules = (): string | null => {
+  const buildAutoRules = (): Record<string, string[]> | null => {
     const senderList = senders
       .split(",")
       .map((s) => s.trim())
@@ -60,7 +63,7 @@ export default function TopicEditor({ topic, onClose }: Props) {
       .map((k) => k.trim())
       .filter(Boolean);
     if (!senderList.length && !keywordList.length) return null;
-    return JSON.stringify({ senders: senderList, subject_contains: keywordList, labels: [] });
+    return { senders: senderList, subject_contains: keywordList, labels: [] };
   };
 
   const createMutation = useMutation({

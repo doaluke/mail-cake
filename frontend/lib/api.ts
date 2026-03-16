@@ -165,7 +165,7 @@ export const topicsApi = {
     color?: string;
     icon?: string;
     skill_prompt?: string;
-    auto_rules?: string;
+    auto_rules?: Record<string, string[]>;
     model_override?: string;
     style_override?: string;
   }) => api.post<Topic>("/topics", data),
@@ -178,7 +178,7 @@ export const topicsApi = {
       color?: string;
       icon?: string;
       skill_prompt?: string;
-      auto_rules?: string;
+      auto_rules?: Record<string, string[]>;
       model_override?: string;
       style_override?: string;
       is_active?: boolean;
